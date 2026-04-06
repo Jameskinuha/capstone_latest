@@ -3,7 +3,10 @@ import 'package:best_flutter_ui_templates/fitness_app/training/training_screen.d
 import 'package:best_flutter_ui_templates/fitness_app/ui_view/account_screen.dart';
 import 'package:best_flutter_ui_templates/fitness_app/my_diary/camera_screen.dart';
 import 'package:best_flutter_ui_templates/fitness_app/my_diary/meals_list_view.dart';
+import 'package:best_flutter_ui_templates/fitness_app/providers/app_provider.dart';
+import 'package:best_flutter_ui_templates/fitness_app/my_diary/calendar_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'bottom_navigation_view/bottom_bar_view.dart';
 import 'fitness_app_theme.dart';
 import 'my_diary/my_diary_screen.dart';
@@ -40,6 +43,172 @@ class _FitnessAppHomeScreenState extends State<FitnessAppHomeScreen>
   void dispose() {
     animationController?.dispose();
     super.dispose();
+  }
+
+  void _showAddDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: FitnessAppTheme.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(32.0),
+            topRight: Radius.circular(32.0),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 16),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: FitnessAppTheme.grey.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 24),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: FitnessAppTheme.nearlyDarkBlue.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.camera_alt, color: FitnessAppTheme.nearlyDarkBlue),
+              ),
+              title: const Text('AI Camera Scan', style: TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: const Text('Detect food and calories using AI'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const CameraScreen()),
+                );
+              },
+            ),
+            const Divider(indent: 70),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.edit, color: Colors.green),
+              ),
+              title: const Text('Manual Entry', style: TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: const Text('Type in your meal details manually'),
+              onTap: () {
+                Navigator.pop(context);
+                _showManualAddDialog();
+              },
+            ),
+            const SizedBox(height: 32),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showManualAddDialog() {
+    final nameController = TextEditingController();
+    final calController = TextEditingController();
+    final proteinController = TextEditingController();
+    final carbsController = TextEditingController();
+    final fatController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Add Meal Manually', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: InputDecoration(
+                  labelText: 'Meal Name (e.g., Apple)',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  prefixIcon: const Icon(Icons.fastfood),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: calController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: 'Calories (kcal)',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  prefixIcon: const Icon(Icons.local_fire_department),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: proteinController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Protein (g)', border: OutlineInputBorder()),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: carbsController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Carbs (g)', border: OutlineInputBorder()),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: fatController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Fat (g)', border: OutlineInputBorder()),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (nameController.text.isNotEmpty && calController.text.isNotEmpty) {
+                final appProvider = Provider.of<AppProvider>(context, listen: false);
+                await appProvider.addFoodItem(
+                  nameController.text,
+                  double.tryParse(calController.text) ?? 0,
+                  protein: double.tryParse(proteinController.text) ?? 0,
+                  carbs: double.tryParse(carbsController.text) ?? 0,
+                  fat: double.tryParse(fatController.text) ?? 0,
+                );
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Meal added successfully!')),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: FitnessAppTheme.nearlyDarkBlue,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Add Meal', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -81,10 +250,7 @@ class _FitnessAppHomeScreenState extends State<FitnessAppHomeScreen>
         BottomBarView(
           tabIconsList: tabIconsList,
           addClick: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const CameraScreen()),
-            );
+            _showAddDialog();
           },
           changeIndex: (int index) {
             if (index == 0) {
@@ -113,7 +279,7 @@ class _FitnessAppHomeScreenState extends State<FitnessAppHomeScreen>
                   return;
                 }
                 setState(() {
-                  tabBody = FoodDiaryScreen(animationController: animationController);
+                  tabBody = CalendarScreen(animationController: animationController);
                 });
               });
             } else if (index == 3) {

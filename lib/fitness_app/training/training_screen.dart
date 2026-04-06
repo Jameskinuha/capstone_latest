@@ -1,4 +1,6 @@
 import 'package:best_flutter_ui_templates/fitness_app/my_diary/workouts_list_view.dart';
+import 'package:best_flutter_ui_templates/fitness_app/training/strava_view.dart';
+import 'package:best_flutter_ui_templates/fitness_app/training/workout_timer_view.dart';
 import 'package:best_flutter_ui_templates/fitness_app/ui_view/area_list_view.dart';
 import 'package:best_flutter_ui_templates/fitness_app/ui_view/running_view.dart';
 import 'package:best_flutter_ui_templates/fitness_app/ui_view/title_view.dart';
@@ -57,7 +59,7 @@ class _TrainingScreenState extends State<TrainingScreen>
   }
 
   void addAllListData() {
-    const int count = 6;
+    const int count = 8;
 
     listViews.add(
       TitleView(
@@ -92,11 +94,31 @@ class _TrainingScreenState extends State<TrainingScreen>
     );
 
     listViews.add(
-      RunningView(
+      WorkoutTimerView(
         animation: Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
             parent: widget.animationController!,
             curve:
                 Interval((1 / count) * 3, 1.0, curve: Curves.fastOutSlowIn))),
+        animationController: widget.animationController!,
+      ),
+    );
+
+    listViews.add(
+      RunningView(
+        animation: Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
+            parent: widget.animationController!,
+            curve:
+                Interval((1 / count) * 4, 1.0, curve: Curves.fastOutSlowIn))),
+        animationController: widget.animationController!,
+      ),
+    );
+
+    listViews.add(
+      StravaView(
+        animation: Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
+            parent: widget.animationController!,
+            curve:
+                Interval((1 / count) * 5, 1.0, curve: Curves.fastOutSlowIn))),
         animationController: widget.animationController!,
       ),
     );
@@ -108,7 +130,7 @@ class _TrainingScreenState extends State<TrainingScreen>
         animation: Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
             parent: widget.animationController!,
             curve:
-                Interval((1 / count) * 4, 1.0, curve: Curves.fastOutSlowIn))),
+                Interval((1 / count) * 6, 1.0, curve: Curves.fastOutSlowIn))),
         animationController: widget.animationController!,
       ),
     );
@@ -118,7 +140,7 @@ class _TrainingScreenState extends State<TrainingScreen>
         mainScreenAnimation: Tween<double>(begin: 0.0, end: 1.0).animate(
             CurvedAnimation(
                 parent: widget.animationController!,
-                curve: Interval((1 / count) * 5, 1.0,
+                curve: Interval((1 / count) * 7, 1.0,
                     curve: Curves.fastOutSlowIn))),
         mainScreenAnimationController: widget.animationController!,
       ),
