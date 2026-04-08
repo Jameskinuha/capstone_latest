@@ -52,6 +52,169 @@ class _CalendarScreenState extends State<CalendarScreen>
     super.initState();
   }
 
+  void _showDayDetailsDialog(DateTime date) {
+    final appProvider = Provider.of<AppProvider>(context, listen: false);
+    
+    final dayFoodItems = appProvider.foodItems
+        .where((item) => DateUtils.isSameDay(item.dateTime, date))
+        .toList();
+        
+    final dayWorkoutItems = appProvider.workoutItems
+        .where((item) => DateUtils.isSameDay(DateTime.parse(item['created_at']), date))
+        .toList();
+
+    final totalEaten = dayFoodItems.fold(0.0, (sum, item) => sum + item.calories);
+    final totalBurned = dayWorkoutItems.fold(0.0, (sum, item) => sum + (item['calories_burned'] ?? 0).toDouble());
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              DateFormat('EEEE').format(date),
+              style: TextStyle(
+                fontSize: 14,
+                color: FitnessAppTheme.grey.withOpacity(0.8),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            Text(
+              DateFormat('d MMMM yyyy').format(date),
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 20,
+                color: FitnessAppTheme.darkerText,
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildSummaryRow('Daily Calories', '${totalEaten.toInt()} kcal', Colors.orange),
+                _buildSummaryRow('Calories Burned', '${totalBurned.toInt()} kcal', Colors.red),
+                const Divider(height: 32),
+                if (dayFoodItems.isNotEmpty) ...[
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: Text('Food Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: FitnessAppTheme.darkerText)),
+                  ),
+                  ...dayFoodItems.map((item) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                  Text(
+                                    'P: ${item.protein.toInt()}g | C: ${item.carbs.toInt()}g | F: ${item.fat.toInt()}g',
+                                    style: TextStyle(fontSize: 11, color: FitnessAppTheme.grey.withOpacity(0.6)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Text('${item.calories.toInt()} kcal', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        if (item.exerciseSuggestions.isNotEmpty && item.exerciseSuggestions != "N/A")
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              '💡 ${item.exerciseSuggestions}',
+                              style: const TextStyle(fontSize: 10, color: FitnessAppTheme.nearlyDarkBlue, fontStyle: FontStyle.italic),
+                            ),
+                          ),
+                      ],
+                    ),
+                  )),
+                ],
+                if (dayWorkoutItems.isNotEmpty) ...[
+                  Padding(
+                    padding: EdgeInsets.only(top: dayFoodItems.isNotEmpty ? 24 : 0, bottom: 8),
+                    child: const Text('Workout Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: FitnessAppTheme.darkerText)),
+                  ),
+                  ...dayWorkoutItems.map((item) {
+                    final int duration = item['duration_seconds'] ?? 0;
+                    final int mins = duration ~/ 60;
+                    final int secs = duration % 60;
+                    final String timeStr = mins > 0 ? '${mins}m ${secs}s' : '${secs}s';
+
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(item['workout_name'] ?? 'Workout', style: const TextStyle(fontWeight: FontWeight.w600)),
+                                Text(
+                                  'Duration: $timeStr',
+                                  style: TextStyle(fontSize: 11, color: FitnessAppTheme.grey.withOpacity(0.6)),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Text('-${(item['calories_burned'] as num).toInt()} kcal', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+                if (dayFoodItems.isEmpty && dayWorkoutItems.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 32),
+                    child: Center(
+                      child: Column(
+                        children: [
+                          Icon(Icons.calendar_today_outlined, size: 40, color: FitnessAppTheme.grey.withOpacity(0.3)),
+                          const SizedBox(height: 8),
+                          Text('No data recorded for this day', style: TextStyle(color: FitnessAppTheme.grey.withOpacity(0.5))),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close', style: TextStyle(color: FitnessAppTheme.nearlyDarkBlue, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummaryRow(String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontWeight: FontWeight.w500, color: FitnessAppTheme.grey)),
+          Text(value, style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 16)),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -179,11 +342,17 @@ class _CalendarScreenState extends State<CalendarScreen>
                 final dayCalories = appProvider.foodItems
                     .where((item) => DateUtils.isSameDay(item.dateTime, date))
                     .fold(0.0, (sum, item) => sum + item.calories);
+                
+                final dayBurned = appProvider.workoutItems
+                    .where((item) => DateUtils.isSameDay(DateTime.parse(item['created_at']), date))
+                    .fold(0.0, (sum, item) => sum + (item['calories_burned'] ?? 0).toDouble());
 
                 return InkWell(
                   onTap: () {
                     appProvider.setSelectedDate(date);
+                    _showDayDetailsDialog(date);
                   },
+                  borderRadius: BorderRadius.circular(8),
                   child: Container(
                     decoration: BoxDecoration(
                       color: isToday ? FitnessAppTheme.nearlyDarkBlue.withOpacity(0.1) : Colors.transparent,
@@ -200,16 +369,31 @@ class _CalendarScreenState extends State<CalendarScreen>
                             color: isToday ? FitnessAppTheme.nearlyDarkBlue : FitnessAppTheme.darkerText,
                           ),
                         ),
-                        if (dayCalories > 0)
-                          Container(
-                            margin: const EdgeInsets.only(top: 2),
-                            width: 4,
-                            height: 4,
-                            decoration: const BoxDecoration(
-                              color: Colors.orange,
-                              shape: BoxShape.circle,
-                            ),
-                          )
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (dayCalories > 0)
+                              Container(
+                                margin: const EdgeInsets.only(top: 2, left: 1, right: 1),
+                                width: 4,
+                                height: 4,
+                                decoration: const BoxDecoration(
+                                  color: Colors.orange,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            if (dayBurned > 0)
+                              Container(
+                                margin: const EdgeInsets.only(top: 2, left: 1, right: 1),
+                                width: 4,
+                                height: 4,
+                                decoration: const BoxDecoration(
+                                  color: Colors.red,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                          ],
+                        )
                       ],
                     ),
                   ),
@@ -225,10 +409,18 @@ class _CalendarScreenState extends State<CalendarScreen>
   Widget _buildMonthlyStats() {
     final appProvider = Provider.of<AppProvider>(context);
     double monthlyTotal = 0;
-    
+    double monthlyBurned = 0;
+
     for (var item in appProvider.foodItems) {
       if (item.dateTime.month == _focusedDay.month && item.dateTime.year == _focusedDay.year) {
         monthlyTotal += item.calories;
+      }
+    }
+    
+    for (var item in appProvider.workoutItems) {
+      DateTime workoutDate = DateTime.parse(item['created_at']);
+      if (workoutDate.month == _focusedDay.month && workoutDate.year == _focusedDay.year) {
+        monthlyBurned += (item['calories_burned'] ?? 0).toDouble();
       }
     }
 
@@ -256,7 +448,7 @@ class _CalendarScreenState extends State<CalendarScreen>
           const SizedBox(height: 12),
           _buildStatCard(
             'Burned (Estimated)',
-            '0 kcal', // Placeholder for burned
+            '${monthlyBurned.toInt()} kcal',
             Icons.local_fire_department,
             Colors.red,
           ),

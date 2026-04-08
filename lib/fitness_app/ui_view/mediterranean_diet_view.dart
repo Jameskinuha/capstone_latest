@@ -8,9 +8,10 @@ import 'dart:math' as math;
 class MediterranesnDietView extends StatelessWidget {
   final AnimationController? animationController;
   final Animation<double>? animation;
+  final VoidCallback? onAddClick;
 
   const MediterranesnDietView(
-      {Key? key, this.animationController, this.animation})
+      {Key? key, this.animationController, this.animation, this.onAddClick})
       : super(key: key);
 
   @override
@@ -22,8 +23,7 @@ class MediterranesnDietView extends StatelessWidget {
         final eaten = appProvider.totalCalories;
         final goal = appProvider.calorieGoal;
         
-        // Burned is 0 by default, placeholder for actual exercise logic later
-        final double burned = 0;
+        final double burned = appProvider.totalBurnedCalories;
         final left = goal - eaten + burned;
 
         final proteinGoal = (goal * 0.25) / 4;
@@ -349,6 +349,29 @@ class MediterranesnDietView extends StatelessWidget {
                                       child: const SizedBox(
                                         width: 108,
                                         height: 108,
+                                      ),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: -8,
+                                    right: -8,
+                                    child: GestureDetector(
+                                      onTap: onAddClick,
+                                      child: Container(
+                                        width: 32,
+                                        height: 32,
+                                        decoration: BoxDecoration(
+                                          color: FitnessAppTheme.nearlyDarkBlue,
+                                          shape: BoxShape.circle,
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: FitnessAppTheme.nearlyDarkBlue.withOpacity(0.4),
+                                              blurRadius: 8,
+                                              offset: const Offset(0, 4),
+                                            ),
+                                          ],
+                                        ),
+                                        child: const Icon(Icons.add, color: Colors.white, size: 20),
                                       ),
                                     ),
                                   )

@@ -1,11 +1,10 @@
-import 'package:best_flutter_ui_templates/fitness_app/my_diary/workouts_list_view.dart';
 import 'package:best_flutter_ui_templates/fitness_app/training/strava_view.dart';
-import 'package:best_flutter_ui_templates/fitness_app/training/workout_timer_view.dart';
-import 'package:best_flutter_ui_templates/fitness_app/ui_view/area_list_view.dart';
-import 'package:best_flutter_ui_templates/fitness_app/ui_view/running_view.dart';
 import 'package:best_flutter_ui_templates/fitness_app/ui_view/title_view.dart';
 import 'package:best_flutter_ui_templates/fitness_app/ui_view/workout_view.dart';
+import 'package:best_flutter_ui_templates/fitness_app/providers/app_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 
 import '../fitness_app_theme.dart';
 
@@ -24,13 +23,14 @@ class _TrainingScreenState extends State<TrainingScreen>
   List<Widget> listViews = <Widget>[];
   final ScrollController scrollController = ScrollController();
   double topBarOpacity = 0.0;
+  Future<bool>? getDataFuture;
 
   @override
   void initState() {
     topBarAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
         CurvedAnimation(
             parent: widget.animationController!,
-            curve: Interval(0, 0.5, curve: Curves.fastOutSlowIn)));
+            curve: const Interval(0, 0.5, curve: Curves.fastOutSlowIn)));
     addAllListData();
 
     scrollController.addListener(() {
@@ -55,15 +55,18 @@ class _TrainingScreenState extends State<TrainingScreen>
         }
       }
     });
+    
+    getDataFuture = getData();
     super.initState();
   }
 
   void addAllListData() {
-    const int count = 8;
+    const int count = 4;
+    listViews.clear();
 
     listViews.add(
       TitleView(
-        titleTxt: 'Your program',
+        titleTxt: 'Recommended Workout',
         subTxt: 'Details',
         animation: Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
             parent: widget.animationController!,
@@ -84,7 +87,9 @@ class _TrainingScreenState extends State<TrainingScreen>
     );
 
     listViews.add(
-      WorkoutsListView(
+      TitleView(
+        titleTxt: 'Strava Activity',
+        subTxt: 'View all',
         animation: Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
             parent: widget.animationController!,
             curve:
@@ -94,55 +99,12 @@ class _TrainingScreenState extends State<TrainingScreen>
     );
 
     listViews.add(
-      WorkoutTimerView(
+      StravaView(
         animation: Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
             parent: widget.animationController!,
             curve:
                 Interval((1 / count) * 3, 1.0, curve: Curves.fastOutSlowIn))),
         animationController: widget.animationController!,
-      ),
-    );
-
-    listViews.add(
-      RunningView(
-        animation: Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
-            parent: widget.animationController!,
-            curve:
-                Interval((1 / count) * 4, 1.0, curve: Curves.fastOutSlowIn))),
-        animationController: widget.animationController!,
-      ),
-    );
-
-    listViews.add(
-      StravaView(
-        animation: Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
-            parent: widget.animationController!,
-            curve:
-                Interval((1 / count) * 5, 1.0, curve: Curves.fastOutSlowIn))),
-        animationController: widget.animationController!,
-      ),
-    );
-
-    listViews.add(
-      TitleView(
-        titleTxt: 'Area of focus',
-        subTxt: 'more',
-        animation: Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
-            parent: widget.animationController!,
-            curve:
-                Interval((1 / count) * 6, 1.0, curve: Curves.fastOutSlowIn))),
-        animationController: widget.animationController!,
-      ),
-    );
-
-    listViews.add(
-      AreaListView(
-        mainScreenAnimation: Tween<double>(begin: 0.0, end: 1.0).animate(
-            CurvedAnimation(
-                parent: widget.animationController!,
-                curve: Interval((1 / count) * 7, 1.0,
-                    curve: Curves.fastOutSlowIn))),
-        mainScreenAnimationController: widget.animationController!,
       ),
     );
   }
@@ -173,7 +135,7 @@ class _TrainingScreenState extends State<TrainingScreen>
 
   Widget getMainListViewUI() {
     return FutureBuilder<bool>(
-      future: getData(),
+      future: getDataFuture,
       builder: (BuildContext context, AsyncSnapshot<bool> snapshot) {
         if (!snapshot.hasData) {
           return const SizedBox();
@@ -249,67 +211,6 @@ class _TrainingScreenState extends State<TrainingScreen>
                                     fontSize: 22 + 6 - 6 * topBarOpacity,
                                     letterSpacing: 1.2,
                                     color: FitnessAppTheme.darkerText,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            SizedBox(
-                              height: 38,
-                              width: 38,
-                              child: InkWell(
-                                highlightColor: Colors.transparent,
-                                borderRadius: const BorderRadius.all(
-                                    Radius.circular(32.0)),
-                                onTap: () {},
-                                child: Center(
-                                  child: Icon(
-                                    Icons.keyboard_arrow_left,
-                                    color: FitnessAppTheme.grey,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.only(
-                                left: 8,
-                                right: 8,
-                              ),
-                              child: Row(
-                                children: <Widget>[
-                                  Padding(
-                                    padding: const EdgeInsets.only(right: 8),
-                                    child: Icon(
-                                      Icons.calendar_today,
-                                      color: FitnessAppTheme.grey,
-                                      size: 18,
-                                    ),
-                                  ),
-                                  Text(
-                                    '15 May',
-                                    textAlign: TextAlign.left,
-                                    style: TextStyle(
-                                      fontFamily: FitnessAppTheme.fontName,
-                                      fontWeight: FontWeight.normal,
-                                      fontSize: 18,
-                                      letterSpacing: -0.2,
-                                      color: FitnessAppTheme.darkerText,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            SizedBox(
-                              height: 38,
-                              width: 38,
-                              child: InkWell(
-                                highlightColor: Colors.transparent,
-                                borderRadius: const BorderRadius.all(
-                                    Radius.circular(32.0)),
-                                onTap: () {},
-                                child: Center(
-                                  child: Icon(
-                                    Icons.keyboard_arrow_right,
-                                    color: FitnessAppTheme.grey,
                                   ),
                                 ),
                               ),
