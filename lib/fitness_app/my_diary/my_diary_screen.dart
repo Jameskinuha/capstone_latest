@@ -317,6 +317,7 @@ class _MyDiaryScreenState extends State<MyDiaryScreen>
         AnimatedBuilder(
           animation: widget.animationController!,
           builder: (BuildContext context, Widget? child) {
+            final appProvider = Provider.of<AppProvider>(context);
             return FadeTransition(
               opacity: topBarAnimation!,
               child: Transform(
@@ -354,7 +355,7 @@ class _MyDiaryScreenState extends State<MyDiaryScreen>
                               child: Padding(
                                 padding: const EdgeInsets.all(8.0),
                                 child: Text(
-                                  'My Diary',
+                                  '${appProvider.displayName} Food Tracker',
                                   textAlign: TextAlign.left,
                                   style: TextStyle(
                                     fontFamily: FitnessAppTheme.fontName,
