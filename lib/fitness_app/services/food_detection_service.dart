@@ -28,102 +28,100 @@ class FoodDetectionResult {
 }
 
 class FoodDetectionService {
-  static const String _token = 'b5efad4c670818631f35d63014dfe66dabf5d173';
+  static const String _token = 'b025576392d37d0a97f9ae240e67b401436f802e';
   static const String _baseUrl = 'https://api.logmeal.es/v2';
 
   FoodDetectionService();
 
-  /// Detects food from an image and fetches comprehensive nutritional data
+  /// Detects food using the 3-step workflow: Segmentation -> Ingredients -> Nutrition
   Future<FoodDetectionResult?> detectFood(String imagePath) async {
     final file = File(imagePath);
-    if (!await file.exists()) return _errorResult('Image not found');
+    if (!await file.exists()) return _errorResult('File Error', 'Image file not found.');
 
     try {
-      // 1. Image Recognition (Dish)
-      final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/image/recognition/dish'));
+      // 1. Recognize Image (Step 1: Complete Segmentation)
+      final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/image/segmentation/complete'));
       request.headers['Authorization'] = 'Bearer $_token';
       request.files.add(await http.MultipartFile.fromPath('image', imagePath, contentType: MediaType('image', 'jpeg')));
 
       final response = await request.send();
       final responseData = await response.stream.bytesToString();
-      if (response.statusCode != 200) return _errorResult('API Error');
 
-      final Map<String, dynamic> recognitionData = jsonDecode(responseData);
-      final List dishes = recognitionData['recognition_results'] ?? [];
-      if (dishes.isEmpty) return _errorResult('Not food');
+      if (response.statusCode != 200) {
+        return _handleApiError(response.statusCode, responseData);
+      }
 
-      final bestDish = dishes[0];
-      final int dishId = bestDish['id'];
-      final String dishName = bestDish['name'] ?? 'Unknown';
-      final List<String> alternatives = dishes.skip(1).take(3).map((d) => d['name'].toString()).toList();
+      final Map<String, dynamic> data = jsonDecode(responseData);
+      final int? imageId = data['imageId'] ?? data['img_id'];
+      
+      if (imageId == null) return _errorResult('Scan Failed', 'Could not generate an Image ID.');
 
-      // 2. Fetch Multi-Feature Data in Parallel (Nutritional Info + Ingredients)
+      // Get the detected segments
+      final List segments = data['segmentation_results'] ?? [];
+      if (segments.isEmpty) return _errorResult('No food detected', 'Try a clearer photo.');
+      
+      // To avoid "stacking" unrelated items, we pick the most prominent food item (the first segment)
+      // This is more accurate for single-item photos
+      final primarySegment = segments[0];
+      final List recognitionResults = primarySegment['recognition_results'] ?? [];
+      final String dishName = recognitionResults.isNotEmpty ? (recognitionResults[0]['name'] ?? 'Unknown food') : 'Unknown food';
+      
+      // 2 & 3. Fetch Ingredients and Nutrition in parallel using the imageId
       final results = await Future.wait([
-        _getNutritionalInfo(dishId),
-        _getIngredients(dishId),
+        _getNutritionalInfo(imageId),
+        _getIngredients(imageId),
       ]);
 
       final nutrition = results[0] as Map<String, dynamic>;
       final ingredients = results[1] as List<String>;
 
-      final Map<String, dynamic> nutrients = nutrition['nutritional_info'] ?? {};
-      final double calories = _toDouble(nutrients['calories']);
-      final Map<String, dynamic> totalNutrients = nutrients['totalNutrients'] ?? {};
+      // Parsing nutritional information
+      // We look for the primary nutritional data to avoid "stacking" totals from background segments
+      final nutritionalInfo = nutrition['nutritional_info'];
+      Map<String, dynamic>? targetNutrients;
+
+      if (nutritionalInfo is List && nutritionalInfo.isNotEmpty) {
+        // Pick the first item's nutrients to match our primary label
+        targetNutrients = nutritionalInfo[0] as Map<String, dynamic>;
+      } else if (nutritionalInfo is Map<String, dynamic>) {
+        targetNutrients = nutritionalInfo;
+      }
+
+      if (targetNutrients == null) return _errorResult('Parsing Error', 'Could not find nutritional data.');
+
+      final double calories = _toDouble(targetNutrients['calories'] ?? targetNutrients['ENERC_KCAL']);
+      final Map<String, dynamic> macros = (targetNutrients['totalNutrients'] ?? targetNutrients['nutrients'] ?? {}) as Map<String, dynamic>;
 
       return FoodDetectionResult(
         label: dishName,
         estimatedCalories: calories,
-        protein: _toDouble(totalNutrients['PROCNT']),
-        carbs: _toDouble(totalNutrients['CHOCDF']),
-        fat: _toDouble(totalNutrients['FAT']),
+        protein: _toDouble(macros['PROCNT'] ?? macros['protein']),
+        carbs: _toDouble(macros['CHOCDF'] ?? macros['carbs']),
+        fat: _toDouble(macros['FAT'] ?? macros['fat']),
         ingredients: ingredients,
         nutriScore: nutrition['nutri_score']?.toString() ?? 'N/A',
-        alternativeLabels: alternatives,
         exerciseSuggestions: _generateExerciseSuggestions(dishName, calories),
       );
     } catch (e) {
-      return _errorResult('Connection Error');
+      print('Detection Error: $e');
+      return _errorResult('Connection Error', 'Please check your internet connection.');
     }
   }
 
-  /// New Feature: Detect food via Barcode for packaged goods
-  Future<FoodDetectionResult?> scanBarcode(String barcode) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$_baseUrl/barcode_scan'),
-        headers: {'Authorization': 'Bearer $_token', 'Content-Type': 'application/json'},
-        body: jsonEncode({'barcode': barcode}),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        // Map barcode response to result (logic varies based on LogMeal's barcode schema)
-        return FoodDetectionResult(
-          label: data['product_name'] ?? 'Packaged Product',
-          estimatedCalories: _toDouble(data['calories']),
-          exerciseSuggestions: _generateExerciseSuggestions(data['product_name'], _toDouble(data['calories'])),
-        );
-      }
-    } catch (e) {
-      print('Barcode error: $e');
-    }
-    return null;
-  }
-
-  Future<Map<String, dynamic>> _getNutritionalInfo(int dishId) async {
+  Future<Map<String, dynamic>> _getNutritionalInfo(int imageId) async {
     final response = await http.post(
-      Uri.parse('$_baseUrl/nutrition/dish/nutritional_info'),
+      Uri.parse('$_baseUrl/nutrition/recipe/nutritionalInfo'),
       headers: {'Authorization': 'Bearer $_token', 'Content-Type': 'application/json'},
-      body: jsonEncode({'dish_id': dishId}),
+      body: jsonEncode({'imageId': imageId}),
     );
     return response.statusCode == 200 ? jsonDecode(response.body) : {};
   }
 
-  Future<List<String>> _getIngredients(int dishId) async {
+  Future<List<String>> _getIngredients(int imageId) async {
     final response = await http.post(
-      Uri.parse('$_baseUrl/recipe/ingredients'),
+      Uri.parse('$_baseUrl/nutrition/recipe/ingredients'),
       headers: {'Authorization': 'Bearer $_token', 'Content-Type': 'application/json'},
-      body: jsonEncode({'dish_id': dishId}),
+      body: jsonEncode({'imageId': imageId}),
     );
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
@@ -133,6 +131,15 @@ class FoodDetectionService {
     return [];
   }
 
+  FoodDetectionResult? _handleApiError(int statusCode, String body) {
+    String message = 'API Error ($statusCode)';
+    try {
+      final errorJson = jsonDecode(body);
+      message = errorJson['message'] ?? errorJson['detail'] ?? message;
+    } catch (_) {}
+    return _errorResult('Scan Failed', message);
+  }
+
   String _generateExerciseSuggestions(String food, double calories) {
     if (calories <= 0) return "N/A";
     int runMin = (calories / 12.25).round();
@@ -140,16 +147,28 @@ class FoodDetectionService {
     return "To burn this $food, you'd need to run for ~$runMin min or walk for ~$walkMin min.";
   }
 
-  FoodDetectionResult _errorResult(String message) {
+  FoodDetectionResult _errorResult(String label, String suggestion) {
     return FoodDetectionResult(
-      label: message,
+      label: label,
       estimatedCalories: 0,
-      exerciseSuggestions: 'Please check your connection.',
+      exerciseSuggestions: suggestion,
     );
   }
 
   double _toDouble(dynamic value) {
     if (value == null) return 0.0;
+    
+    if (value is Map) {
+      final quantity = value['quantity'] ?? value['value'];
+      if (quantity != null) {
+        double val = _toDouble(quantity);
+        final unit = value['unit']?.toString().toLowerCase();
+        if (unit == 'kj') return val / 4.184;
+        return val;
+      }
+      return 0.0;
+    }
+
     if (value is int) return value.toDouble();
     if (value is double) return value;
     if (value is String) return double.tryParse(value) ?? 0.0;

@@ -8,6 +8,7 @@ class AppProvider with ChangeNotifier {
   final List<FoodDiaryItem> _foodItems = [];
   final List<Map<String, dynamic>> _workoutItems = [];
   bool _isLoading = false;
+  bool _isInitialLoadComplete = false;
   
   // User Profile Data
   int _calorieGoal = 2500;
@@ -29,6 +30,7 @@ class AppProvider with ChangeNotifier {
   List<FoodDiaryItem> get foodItems => _foodItems;
   List<Map<String, dynamic>> get workoutItems => _workoutItems;
   bool get isLoading => _isLoading;
+  bool get isInitialLoadComplete => _isInitialLoadComplete;
   
   int get calorieGoal => _calorieGoal;
   double get weight => _weight;
@@ -46,7 +48,8 @@ class AppProvider with ChangeNotifier {
   String? get activeWorkoutName => _activeWorkoutName;
 
   bool get isBmiUpdateRequired {
-    if (_weight == 0 || _height == 0 || _lastBmiUpdate == null) return true;
+    if (!_isInitialLoadComplete) return false;
+    if (_weight <= 0 || _height <= 0 || _lastBmiUpdate == null) return true;
     final difference = DateTime.now().difference(_lastBmiUpdate!);
     return difference.inDays >= 7;
   }
@@ -168,6 +171,7 @@ class AppProvider with ChangeNotifier {
 
   Future<void> _fetchAllData() async {
     _isLoading = true;
+    _isInitialLoadComplete = false;
     notifyListeners();
     
     try {
@@ -177,6 +181,7 @@ class AppProvider with ChangeNotifier {
         fetchFoodItems(notify: false),
         fetchWorkoutItems(notify: false),
       ]);
+      _isInitialLoadComplete = true;
     } catch (e) {
       debugPrint('Error fetching batch data: $e');
     } finally {
@@ -195,6 +200,7 @@ class AppProvider with ChangeNotifier {
     _displayName = '';
     _email = '';
     _lastBmiUpdate = null;
+    _isInitialLoadComplete = false;
     resetTimer();
     notifyListeners();
   }

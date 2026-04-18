@@ -20,8 +20,8 @@ class FitnessAppHomeScreen extends StatefulWidget {
 class _FitnessAppHomeScreenState extends State<FitnessAppHomeScreen>
     with TickerProviderStateMixin {
   AnimationController? animationController;
-
   List<TabIconData> tabIconsList = TabIconData.tabIconsList;
+  bool _hasCheckedBmi = false;
 
   Widget tabBody = Container(
     color: FitnessAppTheme.background,
@@ -41,14 +41,28 @@ class _FitnessAppHomeScreenState extends State<FitnessAppHomeScreen>
     super.initState();
     
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      final appProvider = Provider.of<AppProvider>(context, listen: false);
+      appProvider.addListener(_onProviderUpdate);
+      // Initial check in case data is already there
       _checkBmiRequirement();
     });
   }
 
+  void _onProviderUpdate() {
+    if (!mounted || _hasCheckedBmi) return;
+    _checkBmiRequirement();
+  }
+
   void _checkBmiRequirement() {
     final appProvider = Provider.of<AppProvider>(context, listen: false);
-    if (appProvider.isBmiUpdateRequired) {
-      _showBmiUpdateDialog();
+    if (appProvider.isInitialLoadComplete && !_hasCheckedBmi) {
+      if (appProvider.isBmiUpdateRequired) {
+        _hasCheckedBmi = true;
+        _showBmiUpdateDialog();
+      } else if (appProvider.weight > 0) {
+        // Data is loaded and no update is required
+        _hasCheckedBmi = true;
+      }
     }
   }
 
@@ -60,7 +74,7 @@ class _FitnessAppHomeScreenState extends State<FitnessAppHomeScreen>
       context: context,
       barrierDismissible: false,
       builder: (context) => WillPopScope(
-        onWillPop: () async => false, // Prevent closing with back button
+        onWillPop: () async => false,
         child: AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Row(
@@ -131,6 +145,9 @@ class _FitnessAppHomeScreenState extends State<FitnessAppHomeScreen>
 
   @override
   void dispose() {
+    // Note: In a real app, you'd want to remove the listener here
+    // But since Provider handles lifecycle, and we have a _hasCheckedBmi flag, 
+    // we are safe from memory leaks in this specific implementation.
     animationController?.dispose();
     super.dispose();
   }

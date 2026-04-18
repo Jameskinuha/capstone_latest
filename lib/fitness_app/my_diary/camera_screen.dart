@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'package:camera/camera.dart';
 import 'package:best_flutter_ui_templates/fitness_app/fitness_app_theme.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:image/image.dart' as img;
+import 'package:path_provider/path_provider.dart';
 import '../providers/app_provider.dart';
 import '../services/food_detection_service.dart';
 
@@ -14,47 +16,116 @@ class CameraScreen extends StatefulWidget {
 }
 
 class _CameraScreenState extends State<CameraScreen> {
-  final FoodDetectionService _detectionService = FoodDetectionService();
-  final ImagePicker _picker = ImagePicker();
+  CameraController? _controller;
+  List<CameraDescription>? _cameras;
+  bool _isInitialized = false;
   bool _isProcessing = false;
   String? _imagePath;
+  final FoodDetectionService _detectionService = FoodDetectionService();
 
   @override
   void initState() {
     super.initState();
-    // No longer automatically opening camera to allow choice
+    _initializeCamera();
   }
 
-  Future<void> _pickImage(ImageSource source) async {
-    try {
-      final XFile? image = await _picker.pickImage(
-        source: source,
-        imageQuality: 90, // High quality for AI
+  Future<void> _initializeCamera() async {
+    _cameras = await availableCameras();
+    if (_cameras != null && _cameras!.isNotEmpty) {
+      _controller = CameraController(
+        _cameras![0],
+        ResolutionPreset.high, // Higher resolution for better AI detection
+        enableAudio: false,
       );
 
-      if (image == null) return;
+      try {
+        await _controller!.initialize();
+        if (mounted) {
+          setState(() {
+            _isInitialized = true;
+          });
+        }
+      } catch (e) {
+        debugPrint('Camera initialization error: $e');
+      }
+    }
+  }
 
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _takePicture() async {
+    if (_controller == null || !_controller!.value.isInitialized || _isProcessing) {
+      return;
+    }
+
+    try {
+      final XFile image = await _controller!.takePicture();
+      
       setState(() {
         _imagePath = image.path;
         _isProcessing = true;
       });
+
+      // Crop the image to the center area defined by the border guide
+      final File croppedFile = await _cropImage(File(image.path));
       
-      final result = await _detectionService.detectFood(image.path);
-      
+      final result = await _detectionService.detectFood(croppedFile.path);
+
       if (mounted) {
-        setState(() => _isProcessing = false);
+        setState(() {
+          _isProcessing = false;
+          _imagePath = croppedFile.path;
+        });
         if (result != null) {
-          _showResultDialog(result, image.path);
+          _showResultDialog(result, croppedFile.path);
         } else {
-          _showError('AI could not identify the food. Please ensure the image is clear and centered.');
+          _showError('AI could not identify the food. Please ensure the food fills the box.');
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isProcessing = false);
-        _showError('Error: ${e.toString()}');
+        _showError('Error capturing image: $e');
       }
     }
+  }
+
+  Future<File> _cropImage(File imageFile) async {
+    final bytes = await imageFile.readAsBytes();
+    img.Image? capturedImage = img.decodeImage(bytes);
+
+    if (capturedImage == null) return imageFile;
+
+    // LogMeal prefers square images. We crop to the center.
+    int size = capturedImage.width < capturedImage.height 
+        ? capturedImage.width 
+        : capturedImage.height;
+    
+    // We target the 80% center area to match the UI guide
+    int cropSize = (size * 0.8).toInt();
+    int offsetX = (capturedImage.width - cropSize) ~/ 2;
+    int offsetY = (capturedImage.height - cropSize) ~/ 2;
+
+    img.Image cropped = img.copyCrop(
+      capturedImage, 
+      x: offsetX, 
+      y: offsetY, 
+      width: cropSize, 
+      height: cropSize
+    );
+
+    // Resize to a standard size for LogMeal (1024x1024 is good)
+    img.Image resized = img.copyResize(cropped, width: 1024, height: 1024);
+
+    final directory = await getTemporaryDirectory();
+    final String path = '${directory.path}/food_crop_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final File resultFile = File(path)..writeAsBytesSync(img.encodeJpg(resized, quality: 90));
+    
+    return resultFile;
   }
 
   void _showError(String message) {
@@ -105,10 +176,9 @@ class _CameraScreenState extends State<CameraScreen> {
         actions: [
           TextButton(
             onPressed: () {
-              Navigator.pop(context); // Close dialog
+              Navigator.pop(context);
               setState(() {
                 _imagePath = null;
-                _isProcessing = false;
               });
             }, 
             child: const Text('Cancel')
@@ -148,110 +218,147 @@ class _CameraScreenState extends State<CameraScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_isInitialized || _controller == null) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator(color: Colors.white)),
+      );
+    }
+
+    final size = MediaQuery.of(context).size;
+
     return Scaffold(
-      backgroundColor: FitnessAppTheme.background,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text('AI Food Analysis', style: TextStyle(color: Colors.black)),
-      ),
-      body: Center(
-        child: _isProcessing 
-          ? Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (_imagePath != null)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 32.0),
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          // Camera Preview or Captured Image
+          Center(
+            child: _isProcessing && _imagePath != null
+                ? SizedBox(
+                    width: size.width,
+                    height: size.height,
+                    child: Image.file(File(_imagePath!), fit: BoxFit.cover),
+                  )
+                : AspectRatio(
+                    aspectRatio: _controller!.value.aspectRatio,
+                    child: CameraPreview(_controller!),
+                  ),
+          ),
+
+          // Border Guide (Only show if not processing)
+          if (!_isProcessing)
+            Center(
+              child: Container(
+                width: size.width * 0.8,
+                height: size.width * 0.8,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.white.withOpacity(0.8), width: 2),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+            ),
+
+          // Dimmed Background outside border (Only show if not processing)
+          if (!_isProcessing)
+            ColorFiltered(
+              colorFilter: ColorFilter.mode(
+                Colors.black.withOpacity(0.5),
+                BlendMode.srcOut,
+              ),
+              child: Stack(
+                children: [
+                  Container(
+                    decoration: const BoxDecoration(
+                      color: Colors.black,
+                      backgroundBlendMode: BlendMode.dstOut,
+                    ),
+                  ),
+                  Center(
                     child: Container(
-                      height: MediaQuery.of(context).size.height * 0.4,
+                      width: size.width * 0.8,
+                      height: size.width * 0.8,
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 10,
-                            offset: const Offset(0, 5),
-                          ),
-                        ],
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
                       ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: Image.file(
-                          File(_imagePath!),
-                          fit: BoxFit.cover,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+          // Analyzing Overlay
+          if (_isProcessing)
+            Container(
+              color: Colors.black.withOpacity(0.3),
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 16),
+                    Text(
+                      'AI is analyzing your photo...',
+                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // Header
+          Positioned(
+            top: 40,
+            left: 16,
+            right: 16,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                  onPressed: () => Navigator.pop(context),
+                ),
+                if (!_isProcessing)
+                  const Text(
+                    'Center food in box',
+                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w500),
+                  ),
+                const SizedBox(width: 48), // Spacer
+              ],
+            ),
+          ),
+
+          // Capture Button
+          if (!_isProcessing)
+            Positioned(
+              bottom: 50,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: GestureDetector(
+                  onTap: _takePicture,
+                  child: Container(
+                    height: 80,
+                    width: 80,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 4),
+                    ),
+                    child: Center(
+                      child: Container(
+                        height: 60,
+                        width: 60,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white,
                         ),
                       ),
                     ),
                   ),
-                const SizedBox(height: 32),
-                const CircularProgressIndicator(color: FitnessAppTheme.nearlyDarkBlue),
-                const SizedBox(height: 24),
-                const Text('AI is analyzing your photo...', 
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500)),
-                const SizedBox(height: 8),
-                const Text('Extracting nutritional data', 
-                  style: TextStyle(color: Colors.grey)),
-              ],
-            )
-          : Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.fastfood_outlined, size: 80, color: FitnessAppTheme.nearlyDarkBlue),
-                const SizedBox(height: 24),
-                const Text('How would you like to add food?', 
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 32),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _choiceCard(
-                      icon: Icons.camera_alt,
-                      label: 'Take Photo',
-                      onTap: () => _pickImage(ImageSource.camera),
-                    ),
-                    const SizedBox(width: 24),
-                    _choiceCard(
-                      icon: Icons.photo_library,
-                      label: 'Upload Photo',
-                      onTap: () => _pickImage(ImageSource.gallery),
-                    ),
-                  ],
                 ),
-              ],
+              ),
             ),
-      ),
-    );
-  }
-
-  Widget _choiceCard({required IconData icon, required String label, required VoidCallback onTap}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 140,
-        padding: const EdgeInsets.symmetric(vertical: 24),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            Icon(icon, size: 40, color: FitnessAppTheme.nearlyDarkBlue),
-            const SizedBox(height: 12),
-            Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
-          ],
-        ),
+        ],
       ),
     );
   }
