@@ -38,7 +38,7 @@ class FoodDetectionResult {
 }
 
 class FoodDetectionService {
-  static const String _token = '4f63df165dc3e0d3ce69f94be9f9db9de8f2124f';
+  static const String _token = 'b025576392d37d0a97f9ae240e67b401436f802e';
   static const String _baseUrl = 'https://api.logmeal.es/v2';
 
   // USDA FoodData Central API (free, full nutrition data)
@@ -576,6 +576,46 @@ class FoodDetectionService {
 
     // Eggs — 1 large egg ≈ 50 g
     if (name.contains('egg')) return 50.0;
+
+    // Snacks, chips, and dense foods — 1 oz ≈ 28 g
+    if (name.contains('chip') ||
+        name.contains('crisp') ||
+        name.contains('cracker') ||
+        name.contains('cookie') ||
+        name.contains('biscuit') ||
+        name.contains('nut') ||
+        name.contains('chocolate') ||
+        name.contains('candy') ||
+        name.contains('pretzel') ||
+        name.contains('popcorn'))
+      return 28.0;
+
+    // Breads and pastries — 1 slice / medium piece ≈ 35-50 g
+    if (name.contains('bread') ||
+        name.contains('toast') ||
+        name.contains('pandesal') ||
+        name.contains('bun') ||
+        name.contains('roll') ||
+        name.contains('croissant'))
+      return 50.0;
+
+    // Meats and fish (if not already handled by a dish name) — ~3 oz ≈ 85 g
+    if (name.contains('meat') ||
+        name.contains('pork') ||
+        name.contains('beef') ||
+        name.contains('chicken') ||
+        name.contains('fish') ||
+        name.contains('steak') ||
+        name.contains('sausage'))
+      return 85.0;
+
+    // Fruits — 1 medium piece ≈ 114 g
+    if (name.contains('fruit') ||
+        name.contains('apple') ||
+        name.contains('banana') ||
+        name.contains('orange') ||
+        name.contains('mango'))
+      return 114.0;
 
     // Default: 150 g — a typical single-food serving
     return 150.0;
