@@ -187,13 +187,17 @@ class FoodDetectionService {
       double fat;
 
       if (nutritionData.isNotEmpty) {
-        // Primary: CalorieNinjas (USDA-backed, per-serving data)
-        calories = nutritionData['calories'] ?? 0;
-        protein = nutritionData['protein'] ?? 0;
-        carbs = nutritionData['carbs'] ?? 0;
-        fat = nutritionData['fat'] ?? 0;
+        // USDA/FNRI values are per 100g — scale to a realistic serving size.
+        final servingG = _getServingGrams(foodName);
+        final scale = servingG / 100.0;
+        calories = (nutritionData['calories'] ?? 0) * scale;
+        protein = (nutritionData['protein'] ?? 0) * scale;
+        carbs = (nutritionData['carbs'] ?? 0) * scale;
+        fat = (nutritionData['fat'] ?? 0) * scale;
         debugPrint(
-          'Nutrition source: USDA — $foodName: ${calories.toStringAsFixed(1)} kcal',
+          'Nutrition source: USDA/FNRI — $foodName '
+          '(${servingG.toStringAsFixed(0)}g serving): '
+          '${calories.toStringAsFixed(1)} kcal',
         );
       } else {
         // Fallback: LogMeal nutrition (less accurate, recipe-level estimate)
@@ -337,6 +341,37 @@ class FoodDetectionService {
       debugPrint('USDA Error: $e');
     }
     return {};
+  }
+
+  /// Returns the standard single-serving weight (grams) for a food name.
+  /// USDA and FNRI data are per 100 g, so we scale by servingG / 100.
+  static double _getServingGrams(String foodName) {
+    final name = foodName.toLowerCase();
+
+    // Liquid-based dishes — a bowl is roughly 240 g
+    if (name.contains('sinigang') ||
+        name.contains('bulalo') ||
+        name.contains('nilaga') ||
+        name.contains('tinola') ||
+        name.contains('soup') ||
+        name.contains('mami') ||
+        name.contains('batchoy') ||
+        name.contains('lugaw')) return 240.0;
+
+    // Rice and grain dishes — 1 cup cooked ≈ 186 g
+    if (name.contains('rice') ||
+        name.contains('sinangag') ||
+        name.contains('arroz') ||
+        name.contains('champorado')) return 186.0;
+
+    // Noodle dishes — 1 cup ≈ 150 g
+    if (name.contains('pancit') ||
+        name.contains('palabok') ||
+        name.contains('noodle') ||
+        name.contains('pasta')) return 150.0;
+
+    // Default: 150 g — a typical single-food serving
+    return 150.0;
   }
 
   /// Looks up a food in the local FNRI Filipino food table.
