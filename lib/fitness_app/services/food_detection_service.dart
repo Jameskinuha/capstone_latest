@@ -395,10 +395,30 @@ class FoodDetectionService {
           'syrup',
           'extract',
           'mix',
+          'diet',
+          'zero',
+          'light',
         ];
         for (final w in wrongTypes) {
           if (desc.contains(w) && !foodName.toLowerCase().contains(w))
             score -= 15;
+        }
+        // Penalize ALL-CAPS brand entries (first comma-segment is all uppercase)
+        final firstSeg = (food['description'] ?? '')
+            .toString()
+            .split(',')[0]
+            .trim();
+        if (firstSeg == firstSeg.toUpperCase() && firstSeg.length > 2) {
+          score -= 12;
+        }
+        // Prefer standard beverage can/cup sizes (300–473 mL) over bottles
+        final double rawSrv = _toDouble(food['servingSize']);
+        final String rawUnit = ((food['servingSizeUnit'] ?? '') as String)
+            .toUpperCase();
+        if ((rawUnit == 'ML' || rawUnit == 'MLT' || rawUnit == 'MLL') &&
+            rawSrv >= 300 &&
+            rawSrv <= 473) {
+          score += 5;
         }
         if (score > bestScore) {
           bestScore = score;
@@ -498,8 +518,8 @@ class FoodDetectionService {
         name.contains('pasta'))
       return 150.0;
 
-    // Eggs — 2 large eggs ≈ 100 g
-    if (name.contains('egg')) return 100.0;
+    // Eggs — 1 large egg ≈ 50 g
+    if (name.contains('egg')) return 50.0;
 
     // Default: 150 g — a typical single-food serving
     return 150.0;
@@ -550,6 +570,7 @@ class FoodDetectionService {
       'croissant',
       'pastry',
       'cake',
+      'strudel',
     ];
     // Complex dish words — penalise when NOT already in the original query
     const dishWords = [
