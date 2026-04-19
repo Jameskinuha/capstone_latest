@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:image/image.dart' as img;
+import 'package:shared_preferences/shared_preferences.dart';
 
 class FoodMatch {
   final String name;
@@ -21,6 +22,7 @@ class FoodDetectionResult {
   final double fat;
   final List<String> ingredients;
   final List<FoodMatch> allMatches;
+  final double servingGrams;
 
   FoodDetectionResult({
     required this.label,
@@ -31,6 +33,7 @@ class FoodDetectionResult {
     this.fat = 0,
     this.ingredients = const [],
     this.allMatches = const [],
+    this.servingGrams = 150.0,
   });
 }
 
@@ -170,11 +173,19 @@ class FoodDetectionService {
       if (matches.isEmpty)
         return _errorResult('Unsure', 'AI confidence too low.');
 
-      final String foodName = matches[0].name;
+      String foodName = matches[0].name;
 
-      // Fetch nutrition from CalorieNinjas (accurate) + ingredients from LogMeal in parallel
+      // Check local correction cache — if the user previously corrected this food,
+      // use the corrected name for the nutrition lookup.
+      final correctedName = await _getCorrectedFoodName(foodName);
+      if (correctedName != null) {
+        debugPrint('Using cached correction: "$foodName" → "$correctedName"');
+        foodName = correctedName;
+      }
+
+      // Fetch nutrition from USDA/FNRI + ingredients from LogMeal in parallel
       final results = await Future.wait([
-        _getNutritionFromDatabase(foodName),
+        getNutritionFromDatabase(foodName),
         _getIngredients(imageId),
       ]);
 
@@ -185,6 +196,7 @@ class FoodDetectionService {
       double protein;
       double carbs;
       double fat;
+      double resultServingGrams = getServingGrams(foodName);
 
       if (nutritionData.isNotEmpty) {
         // If a branded serving size was resolved, values are already per-serving.
@@ -195,12 +207,14 @@ class FoodDetectionService {
           protein = nutritionData['protein'] ?? 0;
           carbs = nutritionData['carbs'] ?? 0;
           fat = nutritionData['fat'] ?? 0;
+          resultServingGrams =
+              nutritionData['suggestedServing'] ?? resultServingGrams;
           debugPrint(
             'Nutrition source: USDA Branded — $foodName '
             '(label serving): ${calories.toStringAsFixed(1)} kcal',
           );
         } else {
-          final servingG = _getServingGrams(foodName);
+          final servingG = getServingGrams(foodName);
           final scale = servingG / 100.0;
           calories = (nutritionData['calories'] ?? 0) * scale;
           protein = (nutritionData['protein'] ?? 0) * scale;
@@ -250,6 +264,7 @@ class FoodDetectionService {
         ingredients: ingredientsList,
         allMatches: matches,
         exerciseSuggestions: _generateExerciseSuggestions(foodName, calories),
+        servingGrams: resultServingGrams,
       );
     } catch (e) {
       debugPrint('Detection Error: $e');
@@ -291,7 +306,14 @@ class FoodDetectionService {
   /// Fetches accurate per-serving nutrition data.
   /// Checks local FNRI Filipino food table first, then USDA generic,
   /// then USDA Branded as a fallback for packaged/branded foods.
-  Future<Map<String, double>> _getNutritionFromDatabase(String foodName) async {
+  /// Public so the review dialog can re-fetch when the user picks an alternative.
+  Future<Map<String, double>> getNutritionFromDatabase(String foodName) async {
+    // 0. Zero-calorie items — skip all API calls
+    if (_isZeroCalorie(foodName)) {
+      debugPrint('Zero-calorie shortcut for "$foodName"');
+      return {'calories': 0, 'protein': 0, 'carbs': 0, 'fat': 0};
+    }
+
     // 1. Check Filipino food database first (FNRI data)
     final filipinoResult = _lookupFilipinoFood(foodName);
     if (filipinoResult.isNotEmpty) {
@@ -381,6 +403,11 @@ class FoodDetectionService {
       dynamic bestFood = foods[0];
       for (final food in foods) {
         final desc = (food['description'] ?? '').toString().toLowerCase();
+
+        // Skip entries with no calorie data
+        final double kcal = _extractKcal(food);
+        if (kcal == 0) continue;
+
         int score = 0;
         for (final w in queryWords) {
           if (desc.contains(w)) score += 10;
@@ -488,9 +515,38 @@ class FoodDetectionService {
     }
   }
 
+  /// Returns true for items that are inherently zero (or near-zero) calorie.
+  static bool _isZeroCalorie(String foodName) {
+    final n = foodName.toLowerCase();
+    const zeroCalItems = [
+      'water',
+      'sparkling water',
+      'mineral water',
+      'soda water',
+      'club soda',
+      'plain water',
+      'distilled water',
+      'black coffee',
+      'plain tea',
+      'green tea',
+      'herbal tea',
+      'diet coke',
+      'diet pepsi',
+      'coke zero',
+      'pepsi zero',
+    ];
+    // Exact or near-exact match only — avoid matching "coconut water", "tonic water"
+    for (final item in zeroCalItems) {
+      if (n == item || n == 'bottled $item' || n == '$item bottle') return true;
+    }
+    // Bare single-word "water" with no qualifiers
+    if (n.trim() == 'water') return true;
+    return false;
+  }
+
   /// Returns the standard single-serving weight (grams) for a food name.
   /// USDA and FNRI data are per 100 g, so we scale by servingG / 100.
-  static double _getServingGrams(String foodName) {
+  static double getServingGrams(String foodName) {
     final name = foodName.toLowerCase();
 
     // Liquid-based dishes — a bowl is roughly 240 g
@@ -592,6 +648,11 @@ class FoodDetectionService {
 
     for (final food in foods) {
       final desc = (food['description'] ?? '').toString().toLowerCase();
+
+      // Skip entries with no calorie data — they skew scoring
+      final double kcal = _extractKcal(food);
+      if (kcal == 0) continue;
+
       int score = 0;
 
       // Reward query words found in description
@@ -677,6 +738,40 @@ class FoodDetectionService {
       message = errorJson['message'] ?? errorJson['detail'] ?? message;
     } catch (_) {}
     return _errorResult('Scan Failed ($statusCode)', message);
+  }
+
+  /// Extracts KCAL energy value from a USDA food entry. Returns 0 if absent.
+  static double _extractKcal(dynamic food) {
+    final List nutrients = food['foodNutrients'] ?? [];
+    for (final n in nutrients) {
+      final name = (n['nutrientName'] ?? '').toString().toLowerCase();
+      final unit = (n['unitName'] ?? '').toString().toUpperCase();
+      if (name == 'energy' && unit == 'KCAL')
+        return _toDoubleStatic(n['value']);
+    }
+    return 0;
+  }
+
+  static double _toDoubleStatic(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is int) return value.toDouble();
+    if (value is double) return value;
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
+  }
+
+  /// Returns the user-corrected food name from local cache, or null.
+  Future<String?> _getCorrectedFoodName(String originalName) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String raw = prefs.getString('food_corrections') ?? '{}';
+      final Map<String, dynamic> corrections = jsonDecode(raw);
+      final corrected = corrections[originalName.toLowerCase()];
+      return corrected is String ? corrected : null;
+    } catch (e) {
+      debugPrint('Error reading correction cache: $e');
+      return null;
+    }
   }
 
   String _generateExerciseSuggestions(String food, double calories) {
