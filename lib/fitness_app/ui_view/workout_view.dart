@@ -11,6 +11,41 @@ class WorkoutView extends StatelessWidget {
   const WorkoutView({Key? key, this.animationController, this.animation})
       : super(key: key);
 
+  List<Map<String, dynamic>> _getFallbackRecommendations() {
+    return [
+      {
+        'name': 'Push-ups',
+        'category': 'Home Workout',
+        'calories_per_minute': 7.0,
+        'difficulty': 'Beginner'
+      },
+      {
+        'name': 'Jumping Jacks',
+        'category': 'Home Workout',
+        'calories_per_minute': 8.0,
+        'difficulty': 'Beginner'
+      },
+      {
+        'name': 'Bench Press',
+        'category': 'Gym Workout',
+        'calories_per_minute': 6.5,
+        'difficulty': 'Intermediate'
+      },
+      {
+        'name': 'Treadmill (Running)',
+        'category': 'Gym Workout',
+        'calories_per_minute': 11.0,
+        'difficulty': 'Intermediate'
+      },
+      {
+        'name': 'Burpees',
+        'category': 'Home Workout',
+        'calories_per_minute': 10.0,
+        'difficulty': 'Advanced'
+      },
+    ];
+  }
+
   void _showTimerDialog(BuildContext context, String workoutName) {
     showDialog(
       context: context,
@@ -104,37 +139,11 @@ class WorkoutView extends StatelessWidget {
         final appProvider = Provider.of<AppProvider>(context);
         final int totalKcal = appProvider.totalCalories.toInt();
         final bool isTimerActive = appProvider.timerSeconds > 0;
-
-        final List<Map<String, dynamic>> recommendations = [
-          {
-            'title': 'Walking (Brisk)',
-            'sub': 'Walking at a steady, brisk pace',
-            'icon': Icons.directions_walk,
-            'color': Colors.blue,
-            'burnRate': 3.37, 
-          },
-          {
-            'title': 'Running (Slow)',
-            'sub': 'Jogging at around 8km/h',
-            'icon': Icons.directions_run,
-            'color': Colors.orange,
-            'burnRate': 9.57,
-          },
-          {
-            'title': 'Cycling (Moderate)',
-            'sub': 'Cycling at a moderate speed',
-            'icon': Icons.directions_bike,
-            'color': Colors.cyan,
-            'burnRate': 7.68,
-          },
-          {
-            'title': 'Push-ups/Sit-ups',
-            'sub': 'Vigorous calisthenics',
-            'icon': Icons.fitness_center,
-            'color': Colors.purple,
-            'burnRate': 7.68,
-          },
-        ];
+        
+        // Use database catalog if available, otherwise use fallback data for speed
+        final List<Map<String, dynamic>> recommendations = appProvider.workoutCatalog.isNotEmpty 
+            ? appProvider.workoutCatalog 
+            : _getFallbackRecommendations();
 
         return FadeTransition(
           opacity: animation!,
@@ -181,7 +190,7 @@ class WorkoutView extends StatelessWidget {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'To burn off your current intake ($totalKcal kcal)',
+                                'To burn off your intake ($totalKcal kcal)',
                                 style: TextStyle(
                                   fontFamily: FitnessAppTheme.fontName,
                                   fontSize: 14,
@@ -200,18 +209,27 @@ class WorkoutView extends StatelessWidget {
                       ListView.separated(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        itemCount: recommendations.length,
+                        itemCount: recommendations.length > 5 ? 5 : recommendations.length,
                         separatorBuilder: (context, index) => Padding(
                           padding: const EdgeInsets.only(left: 64, top: 8, bottom: 8),
                           child: Divider(color: FitnessAppTheme.grey.withOpacity(0.1)),
                         ),
                         itemBuilder: (context, index) {
                           final item = recommendations[index];
+                          final String title = item['name'] ?? 'Unknown';
+                          final String category = item['category'] ?? 'General';
+                          final double burnPerMin = (item['calories_per_minute'] as num).toDouble();
+                          final String difficulty = item['difficulty'] ?? 'Beginner';
+                          
                           final int minNeeded = totalKcal > 0 
-                              ? (totalKcal / item['burnRate']).ceil()
+                              ? (totalKcal / burnPerMin).ceil()
                               : 0;
                           
-                          final bool isThisActive = appProvider.activeWorkoutName == item['title'];
+                          final bool isHome = category.toLowerCase().contains('home');
+                          final IconData icon = isHome ? Icons.home_rounded : Icons.fitness_center_rounded;
+                          final Color themeColor = isHome ? Colors.green : Colors.blue;
+
+                          final bool isThisActive = appProvider.activeWorkoutName == title;
                           final bool isDisabled = isTimerActive && !isThisActive;
 
                           return Opacity(
@@ -221,7 +239,7 @@ class WorkoutView extends StatelessWidget {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(content: Text('A workout is already in progress!')),
                                 );
-                              } : () => _showTimerDialog(context, item['title']),
+                              } : () => _showTimerDialog(context, title),
                               borderRadius: BorderRadius.circular(12),
                               child: Padding(
                                 padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -231,14 +249,10 @@ class WorkoutView extends StatelessWidget {
                                       width: 48,
                                       height: 48,
                                       decoration: BoxDecoration(
-                                        color: (item['color'] as Color).withOpacity(0.1),
+                                        color: themeColor.withOpacity(0.1),
                                         borderRadius: BorderRadius.circular(12),
                                       ),
-                                      child: Icon(
-                                        item['icon'] as IconData,
-                                        color: item['color'] as Color,
-                                        size: 28,
-                                      ),
+                                      child: Icon(icon, color: themeColor, size: 28),
                                     ),
                                     const SizedBox(width: 16),
                                     Expanded(
@@ -246,7 +260,7 @@ class WorkoutView extends StatelessWidget {
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            item['title'] as String,
+                                            title,
                                             style: const TextStyle(
                                               fontFamily: FitnessAppTheme.fontName,
                                               fontWeight: FontWeight.bold,
@@ -254,13 +268,33 @@ class WorkoutView extends StatelessWidget {
                                               color: FitnessAppTheme.darkerText,
                                             ),
                                           ),
-                                          Text(
-                                            item['sub'] as String,
-                                            style: TextStyle(
-                                              fontFamily: FitnessAppTheme.fontName,
-                                              fontSize: 12,
-                                              color: FitnessAppTheme.grey.withOpacity(0.7),
-                                            ),
+                                          Row(
+                                            children: [
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: themeColor.withOpacity(0.1),
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                                child: Text(
+                                                  category.toUpperCase(),
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: themeColor,
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                difficulty,
+                                                style: TextStyle(
+                                                  fontFamily: FitnessAppTheme.fontName,
+                                                  fontSize: 12,
+                                                  color: FitnessAppTheme.grey.withOpacity(0.7),
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ],
                                       ),

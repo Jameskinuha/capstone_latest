@@ -22,6 +22,7 @@ class _AccountScreenState extends State<AccountScreen> with TickerProviderStateM
   late TextEditingController _weightController;
   late TextEditingController _heightController;
   late TextEditingController _goalController;
+  String _selectedFrequency = 'weekly';
 
   @override
   void initState() {
@@ -37,6 +38,7 @@ class _AccountScreenState extends State<AccountScreen> with TickerProviderStateM
     _weightController = TextEditingController(text: appProvider.weight > 0 ? appProvider.weight.toString() : "");
     _heightController = TextEditingController(text: appProvider.height > 0 ? appProvider.height.toString() : "");
     _goalController = TextEditingController(text: appProvider.calorieGoal.toString());
+    _selectedFrequency = appProvider.bmiUpdateFrequency;
 
     scrollController.addListener(() {
       if (scrollController.offset >= 24) {
@@ -79,6 +81,7 @@ class _AccountScreenState extends State<AccountScreen> with TickerProviderStateM
       weight: double.tryParse(_weightController.text.trim()),
       height: double.tryParse(_heightController.text.trim()),
       goal: int.tryParse(_goalController.text.trim()),
+      frequency: _selectedFrequency,
     );
     
     ScaffoldMessenger.of(context).showSnackBar(
@@ -136,7 +139,6 @@ class _AccountScreenState extends State<AccountScreen> with TickerProviderStateM
   Widget getMainListViewUI() {
     return Consumer<AppProvider>(
       builder: (context, appProvider, child) {
-        // Update controllers if they are empty and data arrives
         if (_displayNameController.text.isEmpty && appProvider.displayName.isNotEmpty) {
            _displayNameController.text = appProvider.displayName;
         }
@@ -176,6 +178,8 @@ class _AccountScreenState extends State<AccountScreen> with TickerProviderStateM
                     _buildEditField("Height (cm)", _heightController, Icons.height, isNumber: true),
                     const SizedBox(height: 16),
                     _buildEditField("Daily Calorie Goal", _goalController, Icons.flag, isNumber: true),
+                    const SizedBox(height: 24),
+                    _buildFrequencySelector(),
                     const SizedBox(height: 32),
                     SizedBox(
                       width: double.infinity,
@@ -208,6 +212,64 @@ class _AccountScreenState extends State<AccountScreen> with TickerProviderStateM
           ],
         );
       },
+    );
+  }
+
+  Widget _buildFrequencySelector() {
+    final Map<String, String> frequencies = {
+      'everyday': 'Everyday',
+      '3_days': 'Every 3 Days',
+      'weekly': 'Every Week',
+      'biweekly': 'Biweekly',
+      'monthly': 'Every Month',
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: FitnessAppTheme.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: FitnessAppTheme.grey.withOpacity(0.1),
+            offset: const Offset(0, 4),
+            blurRadius: 10,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.update, color: FitnessAppTheme.nearlyDarkBlue),
+              SizedBox(width: 16),
+              Text("BMI Update Frequency", style: TextStyle(color: FitnessAppTheme.grey, fontSize: 12)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: _selectedFrequency,
+              isExpanded: true,
+              style: const TextStyle(color: FitnessAppTheme.darkerText, fontSize: 16, fontWeight: FontWeight.bold),
+              onChanged: (String? newValue) {
+                if (newValue != null) {
+                  setState(() {
+                    _selectedFrequency = newValue;
+                  });
+                }
+              },
+              items: frequencies.entries.map<DropdownMenuItem<String>>((entry) {
+                return DropdownMenuItem<String>(
+                  value: entry.key,
+                  child: Text(entry.value),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

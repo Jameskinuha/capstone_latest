@@ -8,6 +8,7 @@ import 'package:best_flutter_ui_templates/fitness_app/my_diary/calendar_screen.d
 import 'package:best_flutter_ui_templates/fitness_app/training/workout_timer_view.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'bottom_navigation_view/bottom_bar_view.dart';
 import 'fitness_app_theme.dart';
 import 'my_diary/my_diary_screen.dart';
@@ -43,7 +44,6 @@ class _FitnessAppHomeScreenState extends State<FitnessAppHomeScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final appProvider = Provider.of<AppProvider>(context, listen: false);
       appProvider.addListener(_onProviderUpdate);
-      // Initial check in case data is already there
       _checkBmiRequirement();
     });
   }
@@ -60,15 +60,15 @@ class _FitnessAppHomeScreenState extends State<FitnessAppHomeScreen>
         _hasCheckedBmi = true;
         _showBmiUpdateDialog();
       } else if (appProvider.weight > 0) {
-        // Data is loaded and no update is required
         _hasCheckedBmi = true;
       }
     }
   }
 
   void _showBmiUpdateDialog() {
-    final weightController = TextEditingController(text: Provider.of<AppProvider>(context, listen: false).weight.toString());
-    final heightController = TextEditingController(text: Provider.of<AppProvider>(context, listen: false).height.toString());
+    final appProvider = Provider.of<AppProvider>(context, listen: false);
+    final weightController = TextEditingController(text: appProvider.weight > 0 ? appProvider.weight.toString() : '');
+    final heightController = TextEditingController(text: '');
 
     showDialog(
       context: context,
@@ -86,11 +86,35 @@ class _FitnessAppHomeScreenState extends State<FitnessAppHomeScreen>
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Please update your measurements to keep your calorie calculations accurate.',
+                'Please update your weight. Height is optional.',
                 style: TextStyle(color: FitnessAppTheme.grey),
               ),
+              const SizedBox(height: 12),
+              if (appProvider.height > 0)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: FitnessAppTheme.nearlyDarkBlue.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: FitnessAppTheme.nearlyDarkBlue.withOpacity(0.1)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.height, color: FitnessAppTheme.nearlyDarkBlue, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Previous Height: ${appProvider.height.toInt()} cm',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: FitnessAppTheme.nearlyDarkBlue,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               const SizedBox(height: 24),
               TextField(
                 controller: weightController,
@@ -106,7 +130,8 @@ class _FitnessAppHomeScreenState extends State<FitnessAppHomeScreen>
                 controller: heightController,
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
-                  labelText: 'Current Height (cm)',
+                  labelText: 'New Height (cm) - Optional',
+                  hintText: 'Leave blank to keep current',
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   prefixIcon: const Icon(Icons.height),
                 ),
@@ -119,14 +144,29 @@ class _FitnessAppHomeScreenState extends State<FitnessAppHomeScreen>
                 final weight = double.tryParse(weightController.text);
                 final height = double.tryParse(heightController.text);
                 
-                if (weight != null && weight > 0 && height != null && height > 0) {
-                  await Provider.of<AppProvider>(context, listen: false).updateProfile(
-                    weight: weight,
-                    height: height,
-                  );
-                  Navigator.pop(context);
+                if (weight != null && weight > 0) {
+                  try {
+                    await Provider.of<AppProvider>(context, listen: false).logBmiUpdate(
+                      weight,
+                      height: height,
+                    );
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('BMI log saved successfully!')),
+                    );
+                  } catch (e) {
+                    if (e.toString().contains('JWT expired')) {
+                      await Supabase.instance.client.auth.signOut();
+                      Navigator.pop(context);
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Error saving update. Please try again.')),
+                      );
+                    }
+                  }
+                } else {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Measurements updated successfully!')),
+                    const SnackBar(content: Text('Please enter a valid weight.')),
                   );
                 }
               },
@@ -135,7 +175,7 @@ class _FitnessAppHomeScreenState extends State<FitnessAppHomeScreen>
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 minimumSize: const Size(double.infinity, 45),
               ),
-              child: const Text('Update Now', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              child: const Text('Save Update', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -145,9 +185,6 @@ class _FitnessAppHomeScreenState extends State<FitnessAppHomeScreen>
 
   @override
   void dispose() {
-    // Note: In a real app, you'd want to remove the listener here
-    // But since Provider handles lifecycle, and we have a _hasCheckedBmi flag, 
-    // we are safe from memory leaks in this specific implementation.
     animationController?.dispose();
     super.dispose();
   }

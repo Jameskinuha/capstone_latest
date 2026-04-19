@@ -6,6 +6,7 @@ import 'package:best_flutter_ui_templates/fitness_app/ui_view/mediterranean_diet
 import 'package:best_flutter_ui_templates/fitness_app/ui_view/title_view.dart';
 import 'package:best_flutter_ui_templates/fitness_app/fitness_app_theme.dart';
 import 'package:best_flutter_ui_templates/fitness_app/ui_view/workout_view.dart';
+import 'package:best_flutter_ui_templates/fitness_app/ui_view/bmi_history_view.dart';
 import 'package:best_flutter_ui_templates/fitness_app/providers/app_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -61,7 +62,7 @@ class _MyDiaryScreenState extends State<MyDiaryScreen>
   }
 
   void addAllListData() {
-    const int count = 5;
+    const int count = 6;
 
     listViews.add(
       TitleView(
@@ -108,14 +109,23 @@ class _MyDiaryScreenState extends State<MyDiaryScreen>
         animationController: widget.animationController!,
       ),
     );
+
+    listViews.add(
+      BmiHistoryView(
+        animation: Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(
+            parent: widget.animationController!,
+            curve:
+                Interval((1 / count) * 4, 1.0, curve: Curves.fastOutSlowIn))),
+        animationController: widget.animationController!,
+      ),
+    );
     
-    // Recommended Workouts with new design
     listViews.add(
       WorkoutView(
         animation: Tween<double>(begin: 0.0, end: 1.0).animate(
             CurvedAnimation(
                 parent: widget.animationController!,
-                curve: Interval((1 / count) * 4, 1.0,
+                curve: Interval((1 / count) * 5, 1.0,
                     curve: Curves.fastOutSlowIn))),
         animationController: widget.animationController,
       ),

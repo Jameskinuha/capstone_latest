@@ -1,7 +1,15 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+
+class FoodMatch {
+  final String name;
+  final double confidence;
+
+  FoodMatch({required this.name, required this.confidence});
+}
 
 class FoodDetectionResult {
   final String label;
@@ -11,8 +19,7 @@ class FoodDetectionResult {
   final double carbs;
   final double fat;
   final List<String> ingredients;
-  final String nutriScore;
-  final List<String> alternativeLabels;
+  final List<FoodMatch> allMatches;
 
   FoodDetectionResult({
     required this.label,
@@ -22,8 +29,7 @@ class FoodDetectionResult {
     this.carbs = 0,
     this.fat = 0,
     this.ingredients = const [],
-    this.nutriScore = 'N/A',
-    this.alternativeLabels = const [],
+    this.allMatches = const [],
   });
 }
 
@@ -33,14 +39,12 @@ class FoodDetectionService {
 
   FoodDetectionService();
 
-  /// Detects food using the 3-step workflow: Segmentation -> Ingredients -> Nutrition
   Future<FoodDetectionResult?> detectFood(String imagePath) async {
     final file = File(imagePath);
     if (!await file.exists()) return _errorResult('File Error', 'Image file not found.');
 
     try {
-      // 1. Recognize Image (Step 1: Complete Segmentation)
-      final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/image/segmentation/complete'));
+      final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/image/recognition/complete'));
       request.headers['Authorization'] = 'Bearer $_token';
       request.files.add(await http.MultipartFile.fromPath('image', imagePath, contentType: MediaType('image', 'jpeg')));
 
@@ -54,57 +58,57 @@ class FoodDetectionService {
       final Map<String, dynamic> data = jsonDecode(responseData);
       final int? imageId = data['imageId'] ?? data['img_id'];
       
-      if (imageId == null) return _errorResult('Scan Failed', 'Could not generate an Image ID.');
+      if (imageId == null) return _errorResult('Scan Failed', 'Could not process image.');
 
-      // Get the detected segments
-      final List segments = data['segmentation_results'] ?? [];
-      if (segments.isEmpty) return _errorResult('No food detected', 'Try a clearer photo.');
-      
-      // To avoid "stacking" unrelated items, we pick the most prominent food item (the first segment)
-      // This is more accurate for single-item photos
-      final primarySegment = segments[0];
-      final List recognitionResults = primarySegment['recognition_results'] ?? [];
-      final String dishName = recognitionResults.isNotEmpty ? (recognitionResults[0]['name'] ?? 'Unknown food') : 'Unknown food';
-      
-      // 2 & 3. Fetch Ingredients and Nutrition in parallel using the imageId
+      final List recognitionResults = data['recognition_results'] ?? [];
+      if (recognitionResults.isEmpty) return _errorResult('No food detected', 'Try a clearer photo.');
+
+      // Capture all valid matches (over 15% confidence)
+      final List<FoodMatch> matches = recognitionResults
+          .where((m) => (m['prob'] ?? 0.0) >= 0.15)
+          .map((m) => FoodMatch(
+                name: m['name'] ?? 'Unknown',
+                confidence: (m['prob'] ?? 0.0).toDouble(),
+              ))
+          .toList();
+
+      if (matches.isEmpty) return _errorResult('Unsure', 'AI confidence too low.');
+
       final results = await Future.wait([
         _getNutritionalInfo(imageId),
         _getIngredients(imageId),
       ]);
 
       final nutrition = results[0] as Map<String, dynamic>;
-      final ingredients = results[1] as List<String>;
+      final ingredientsList = results[1] as List<String>;
 
-      // Parsing nutritional information
-      // We look for the primary nutritional data to avoid "stacking" totals from background segments
       final nutritionalInfo = nutrition['nutritional_info'];
       Map<String, dynamic>? targetNutrients;
 
       if (nutritionalInfo is List && nutritionalInfo.isNotEmpty) {
-        // Pick the first item's nutrients to match our primary label
         targetNutrients = nutritionalInfo[0] as Map<String, dynamic>;
       } else if (nutritionalInfo is Map<String, dynamic>) {
         targetNutrients = nutritionalInfo;
       }
 
-      if (targetNutrients == null) return _errorResult('Parsing Error', 'Could not find nutritional data.');
+      if (targetNutrients == null) return _errorResult('No Data', 'Found food but no nutrition data.');
 
       final double calories = _toDouble(targetNutrients['calories'] ?? targetNutrients['ENERC_KCAL']);
       final Map<String, dynamic> macros = (targetNutrients['totalNutrients'] ?? targetNutrients['nutrients'] ?? {}) as Map<String, dynamic>;
 
       return FoodDetectionResult(
-        label: dishName,
+        label: matches[0].name,
         estimatedCalories: calories,
         protein: _toDouble(macros['PROCNT'] ?? macros['protein']),
         carbs: _toDouble(macros['CHOCDF'] ?? macros['carbs']),
         fat: _toDouble(macros['FAT'] ?? macros['fat']),
-        ingredients: ingredients,
-        nutriScore: nutrition['nutri_score']?.toString() ?? 'N/A',
-        exerciseSuggestions: _generateExerciseSuggestions(dishName, calories),
+        ingredients: ingredientsList,
+        allMatches: matches,
+        exerciseSuggestions: _generateExerciseSuggestions(matches[0].name, calories),
       );
     } catch (e) {
-      print('Detection Error: $e');
-      return _errorResult('Connection Error', 'Please check your internet connection.');
+      debugPrint('Detection Error: $e');
+      return _errorResult('Connection Error', 'Please check connection.');
     }
   }
 
@@ -144,7 +148,7 @@ class FoodDetectionService {
     if (calories <= 0) return "N/A";
     int runMin = (calories / 12.25).round();
     int walkMin = (calories / 4.3).round();
-    return "To burn this $food, you'd need to run for ~$runMin min or walk for ~$walkMin min.";
+    return "To burn this $food, run for ~$runMin min or walk for ~$walkMin min.";
   }
 
   FoodDetectionResult _errorResult(String label, String suggestion) {
@@ -157,18 +161,11 @@ class FoodDetectionService {
 
   double _toDouble(dynamic value) {
     if (value == null) return 0.0;
-    
     if (value is Map) {
       final quantity = value['quantity'] ?? value['value'];
-      if (quantity != null) {
-        double val = _toDouble(quantity);
-        final unit = value['unit']?.toString().toLowerCase();
-        if (unit == 'kj') return val / 4.184;
-        return val;
-      }
+      if (quantity != null) return _toDouble(quantity);
       return 0.0;
     }
-
     if (value is int) return value.toDouble();
     if (value is double) return value;
     if (value is String) return double.tryParse(value) ?? 0.0;
