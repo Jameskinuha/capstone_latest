@@ -187,18 +187,31 @@ class FoodDetectionService {
       double fat;
 
       if (nutritionData.isNotEmpty) {
-        // USDA/FNRI values are per 100g — scale to a realistic serving size.
-        final servingG = _getServingGrams(foodName);
-        final scale = servingG / 100.0;
-        calories = (nutritionData['calories'] ?? 0) * scale;
-        protein = (nutritionData['protein'] ?? 0) * scale;
-        carbs = (nutritionData['carbs'] ?? 0) * scale;
-        fat = (nutritionData['fat'] ?? 0) * scale;
-        debugPrint(
-          'Nutrition source: USDA/FNRI — $foodName '
-          '(${servingG.toStringAsFixed(0)}g serving): '
-          '${calories.toStringAsFixed(1)} kcal',
-        );
+        // If a branded serving size was resolved, values are already per-serving.
+        // Otherwise scale from per-100g using food-type serving estimate.
+        final branded = (nutritionData['suggestedServing'] ?? 0) > 0;
+        if (branded) {
+          calories = nutritionData['calories'] ?? 0;
+          protein = nutritionData['protein'] ?? 0;
+          carbs = nutritionData['carbs'] ?? 0;
+          fat = nutritionData['fat'] ?? 0;
+          debugPrint(
+            'Nutrition source: USDA Branded — $foodName '
+            '(label serving): ${calories.toStringAsFixed(1)} kcal',
+          );
+        } else {
+          final servingG = _getServingGrams(foodName);
+          final scale = servingG / 100.0;
+          calories = (nutritionData['calories'] ?? 0) * scale;
+          protein = (nutritionData['protein'] ?? 0) * scale;
+          carbs = (nutritionData['carbs'] ?? 0) * scale;
+          fat = (nutritionData['fat'] ?? 0) * scale;
+          debugPrint(
+            'Nutrition source: USDA/FNRI — $foodName '
+            '(${servingG.toStringAsFixed(0)}g serving): '
+            '${calories.toStringAsFixed(1)} kcal',
+          );
+        }
       } else {
         // Fallback: LogMeal nutrition (less accurate, recipe-level estimate)
         debugPrint('USDA unavailable, falling back to LogMeal nutrition');
@@ -276,7 +289,8 @@ class FoodDetectionService {
   }
 
   /// Fetches accurate per-serving nutrition data.
-  /// Checks local FNRI Filipino food table first, then falls back to USDA.
+  /// Checks local FNRI Filipino food table first, then USDA generic,
+  /// then USDA Branded as a fallback for packaged/branded foods.
   Future<Map<String, double>> _getNutritionFromDatabase(String foodName) async {
     // 1. Check Filipino food database first (FNRI data)
     final filipinoResult = _lookupFilipinoFood(foodName);
@@ -287,7 +301,7 @@ class FoodDetectionService {
       return filipinoResult;
     }
 
-    // 2. Fall back to USDA FoodData Central
+    // 2. USDA SR Legacy / Foundation (generic whole foods, per 100g)
     try {
       final url = Uri.parse(
         '$_nutritionApiUrl?query=${Uri.encodeComponent(foodName)}&pageSize=10&dataType=SR%20Legacy,Foundation&api_key=$_usdaApiKey',
@@ -301,46 +315,157 @@ class FoodDetectionService {
         final List foods = data['foods'] ?? [];
 
         if (foods.isNotEmpty) {
-          // Pick the best match — penalize processed/dry/powder forms
-          // that don't represent what was actually scanned
-          final food = _pickBestMatch(foodName, foods);
-          final List nutrients = food['foodNutrients'] ?? [];
+          final (food, score) = _pickBestMatch(foodName, foods);
 
-          double calories = 0, protein = 0, carbs = 0, fat = 0;
-
-          for (final n in nutrients) {
-            final name = (n['nutrientName'] ?? '').toString().toLowerCase();
-            final unit = (n['unitName'] ?? '').toString().toUpperCase();
-            final value = _toDouble(n['value']);
-            if (name == 'energy' && unit == 'KCAL') {
-              calories = value;
-            } else if (name == 'protein') {
-              protein = value;
-            } else if (name.contains('carbohydrate')) {
-              carbs = value;
-            } else if (name == 'total lipid (fat)') {
-              fat = value;
+          // Only use this result if it's a plausible match (score >= 5)
+          if (score >= 5) {
+            final List nutrients = food['foodNutrients'] ?? [];
+            double calories = 0, protein = 0, carbs = 0, fat = 0;
+            for (final n in nutrients) {
+              final name = (n['nutrientName'] ?? '').toString().toLowerCase();
+              final unit = (n['unitName'] ?? '').toString().toUpperCase();
+              final value = _toDouble(n['value']);
+              if (name == 'energy' && unit == 'KCAL')
+                calories = value;
+              else if (name == 'protein')
+                protein = value;
+              else if (name.contains('carbohydrate'))
+                carbs = value;
+              else if (name == 'total lipid (fat)')
+                fat = value;
             }
+            debugPrint(
+              'USDA SR match (score=$score): "${food['description']}" → ${calories}kcal',
+            );
+            return {
+              'calories': calories,
+              'protein': protein,
+              'carbs': carbs,
+              'fat': fat,
+            };
+          } else {
+            debugPrint(
+              'USDA SR poor match (score=$score): "${food['description']}" — trying branded',
+            );
           }
-
-          debugPrint(
-            'USDA match: "${food['description']}" → ${calories}kcal, ${protein}g protein, ${carbs}g carbs, ${fat}g fat',
-          );
-
-          return {
-            'calories': calories,
-            'protein': protein,
-            'carbs': carbs,
-            'fat': fat,
-          };
         }
       } else {
         debugPrint('USDA API error: ${response.statusCode}');
       }
     } catch (e) {
-      debugPrint('USDA Error: $e');
+      debugPrint('USDA SR Error: $e');
     }
-    return {};
+
+    // 3. USDA Branded fallback — for packaged/junk foods where SR has no match.
+    //    Returns already-scaled per-serving values (label calories) via suggestedServing > 0.
+    return await _queryBrandedUSDA(foodName);
+  }
+
+  /// Queries USDA Branded Foods database and returns label-accurate per-serving nutrition.
+  /// Sets suggestedServing > 0 so detectFood() skips the generic serving-size estimate.
+  Future<Map<String, double>> _queryBrandedUSDA(String foodName) async {
+    try {
+      final url = Uri.parse(
+        '$_nutritionApiUrl?query=${Uri.encodeComponent(foodName)}&pageSize=10&dataType=Branded&api_key=$_usdaApiKey',
+      );
+      final response = await http.get(url);
+      if (response.statusCode != 200) return {};
+
+      final data = jsonDecode(response.body);
+      final List foods = data['foods'] ?? [];
+      if (foods.isEmpty) return {};
+
+      // Simple scoring for branded: reward query word matches, skip ALL-CAPS penalty
+      final queryWords = foodName.toLowerCase().split(' ');
+      int bestScore = -999;
+      dynamic bestFood = foods[0];
+      for (final food in foods) {
+        final desc = (food['description'] ?? '').toString().toLowerCase();
+        int score = 0;
+        for (final w in queryWords) {
+          if (desc.contains(w)) score += 10;
+        }
+        // Penalize clearly wrong categories
+        const wrongTypes = [
+          'cake',
+          'sauce',
+          'candy',
+          'chew',
+          'gum',
+          'syrup',
+          'extract',
+          'mix',
+        ];
+        for (final w in wrongTypes) {
+          if (desc.contains(w) && !foodName.toLowerCase().contains(w))
+            score -= 15;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          bestFood = food;
+        }
+      }
+
+      final List nutrients = bestFood['foodNutrients'] ?? [];
+      double calories = 0, protein = 0, carbs = 0, fat = 0;
+      for (final n in nutrients) {
+        final name = (n['nutrientName'] ?? '').toString().toLowerCase();
+        final unit = (n['unitName'] ?? '').toString().toUpperCase();
+        final value = _toDouble(n['value']);
+        if (name == 'energy' && unit == 'KCAL')
+          calories = value;
+        else if (name == 'protein')
+          protein = value;
+        else if (name.contains('carbohydrate'))
+          carbs = value;
+        else if (name == 'total lipid (fat)')
+          fat = value;
+      }
+
+      // Apply the label serving size if available and valid
+      final double rawServing = _toDouble(bestFood['servingSize']);
+      final String servUnit = ((bestFood['servingSizeUnit'] ?? '') as String)
+          .toUpperCase();
+      // Accept gram-based and mL-based units; skip nonsensical micro-units
+      final bool validServing =
+          rawServing > 1 &&
+          (servUnit == 'G' ||
+              servUnit == 'GRM' ||
+              servUnit == 'ML' ||
+              servUnit == 'MLT' ||
+              servUnit == 'MLL' ||
+              servUnit.isEmpty);
+
+      if (validServing) {
+        final scale = rawServing / 100.0;
+        debugPrint(
+          'USDA Branded match: "${bestFood['description']}" '
+          '(${rawServing}${servUnit} serving) → ${(calories * scale).toStringAsFixed(1)} kcal',
+        );
+        return {
+          'calories': calories * scale,
+          'protein': protein * scale,
+          'carbs': carbs * scale,
+          'fat': fat * scale,
+          'suggestedServing':
+              rawServing, // signals detectFood() not to re-scale
+        };
+      }
+
+      // No valid serving size — return per-100g and let detectFood() scale
+      debugPrint(
+        'USDA Branded (no serving): "${bestFood['description']}" → ${calories}kcal/100g',
+      );
+      return {
+        'calories': calories,
+        'protein': protein,
+        'carbs': carbs,
+        'fat': fat,
+      };
+    } catch (e) {
+      debugPrint('USDA Branded Error: $e');
+      return {};
+    }
   }
 
   /// Returns the standard single-serving weight (grams) for a food name.
@@ -356,19 +481,25 @@ class FoodDetectionService {
         name.contains('soup') ||
         name.contains('mami') ||
         name.contains('batchoy') ||
-        name.contains('lugaw')) return 240.0;
+        name.contains('lugaw'))
+      return 240.0;
 
     // Rice and grain dishes — 1 cup cooked ≈ 186 g
     if (name.contains('rice') ||
         name.contains('sinangag') ||
         name.contains('arroz') ||
-        name.contains('champorado')) return 186.0;
+        name.contains('champorado'))
+      return 186.0;
 
     // Noodle dishes — 1 cup ≈ 150 g
     if (name.contains('pancit') ||
         name.contains('palabok') ||
         name.contains('noodle') ||
-        name.contains('pasta')) return 150.0;
+        name.contains('pasta'))
+      return 150.0;
+
+    // Eggs — 2 large eggs ≈ 100 g
+    if (name.contains('egg')) return 100.0;
 
     // Default: 150 g — a typical single-food serving
     return 150.0;
@@ -399,7 +530,8 @@ class FoodDetectionService {
 
   /// Scores USDA results and picks the best match for the scanned food.
   /// Prefers cooked/raw generic items over dried, powdered, or branded variants.
-  Map<String, dynamic> _pickBestMatch(String query, List foods) {
+  /// Returns (bestFood, bestScore) so callers can gauge match quality.
+  (Map<String, dynamic>, int) _pickBestMatch(String query, List foods) {
     final queryWords = query.toLowerCase().split(' ');
     // Words that indicate a processed/unnatural form unlikely to match a scanned food
     const penaltyWords = [
@@ -413,6 +545,11 @@ class FoodDetectionService {
       'frozen',
       'canned',
       'mix',
+      'oil',
+      'extract',
+      'croissant',
+      'pastry',
+      'cake',
     ];
     // Complex dish words — penalise when NOT already in the original query
     const dishWords = [
@@ -491,7 +628,7 @@ class FoodDetectionService {
       }
     }
 
-    return bestFood as Map<String, dynamic>;
+    return (bestFood as Map<String, dynamic>, bestScore);
   }
 
   Future<List<String>> _getIngredients(int imageId) async {
