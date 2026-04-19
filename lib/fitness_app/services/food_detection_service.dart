@@ -418,7 +418,7 @@ class FoodDetectionService {
         }
       }
 
-      // Reward generic cooked forms (only if not already a query word)
+      // Reward cooking method words in description (only if not already a query word)
       const cookedWords = [
         'cooked',
         'grilled',
@@ -426,9 +426,20 @@ class FoodDetectionService {
         'fried',
         'boiled',
         'roasted',
+        'steamed',
       ];
       for (final word in cookedWords) {
         if (desc.contains(word) && !queryWords.contains(word)) score += 5;
+      }
+
+      // Penalize results missing all non-cooking base food words from the query.
+      // e.g. for "steamed broccoli", any result without "broccoli" gets -20.
+      final baseFoodWords = queryWords
+          .where((w) => w.length > 3 && !cookedWords.contains(w))
+          .toList();
+      if (baseFoodWords.isNotEmpty &&
+          !baseFoodWords.any((w) => desc.contains(w))) {
+        score -= 20;
       }
 
       // Penalize ALL-CAPS brand names (USDA branded format: "MCDONALD'S, ...")
