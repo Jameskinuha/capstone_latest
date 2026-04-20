@@ -38,7 +38,7 @@ class FoodDetectionResult {
 }
 
 class FoodDetectionService {
-  static const String _token = 'b025576392d37d0a97f9ae240e67b401436f802e';
+  static const String _token = '7aeb178f0faa191e4df37fdb1c3ec7010e2203ea';
   static const String _baseUrl = 'https://api.logmeal.es/v2';
 
   // USDA FoodData Central API (free, full nutrition data)
