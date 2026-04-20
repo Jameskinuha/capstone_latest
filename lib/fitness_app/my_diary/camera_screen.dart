@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:camera/camera.dart';
@@ -183,8 +184,9 @@ class _CameraScreenState extends State<CameraScreen> {
     double portionMultiplier = 1.0;
     bool isRefetching = false;
 
-    // Drink volume input
-    final bool isDrink = _isDrink(result.label);
+    // Drink volume input — re-evaluated whenever the food name changes
+    bool isDrink = _isDrink(result.label);
+    Timer? _nameDebounce;
     double baseServingMl = result.servingGrams;
     final volumeController = TextEditingController(
       text: result.servingGrams.round().toString(),
@@ -288,10 +290,26 @@ class _CameraScreenState extends State<CameraScreen> {
                   // Edit Name
                   TextField(
                     controller: nameController,
+                    onChanged: (val) {
+                      setState(() => isDrink = _isDrink(val));
+                      _nameDebounce?.cancel();
+                      final trimmed = val.trim();
+                      if (trimmed.isNotEmpty) {
+                        _nameDebounce = Timer(
+                          const Duration(milliseconds: 700),
+                          () {
+                            portionMultiplier = 1.0;
+                            isDrink = _isDrink(trimmed);
+                            _refetchNutrition(setState, trimmed);
+                          },
+                        );
+                      }
+                    },
                     decoration: const InputDecoration(
                       labelText: 'Food Name',
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.fastfood),
+                      helperText: 'Type to search & update nutrition live',
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -479,6 +497,7 @@ class _CameraScreenState extends State<CameraScreen> {
                                         nameController.text != match.name) {
                                       nameController.text = match.name;
                                       portionMultiplier = 1.0;
+                                      isDrink = _isDrink(match.name);
                                       _refetchNutrition(setState, match.name);
                                     }
                                   },
@@ -492,7 +511,10 @@ class _CameraScreenState extends State<CameraScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () {
+                _nameDebounce?.cancel();
+                Navigator.pop(context);
+              },
               child: const Text('Cancel'),
             ),
             ElevatedButton(
@@ -505,6 +527,7 @@ class _CameraScreenState extends State<CameraScreen> {
               onPressed: isRefetching
                   ? null
                   : () async {
+                      _nameDebounce?.cancel();
                       final double finalCals =
                           double.tryParse(calController.text) ?? 0;
 
